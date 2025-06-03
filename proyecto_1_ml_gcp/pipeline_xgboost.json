@@ -1,0 +1,265 @@
+{
+  "components": {
+    "comp-register-model-in-vertex-ai": {
+      "executorLabel": "exec-register-model-in-vertex-ai",
+      "inputDefinitions": {
+        "parameters": {
+          "model_display_name": {
+            "parameterType": "STRING"
+          },
+          "model_output_path": {
+            "parameterType": "STRING"
+          },
+          "month": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "year": {
+            "parameterType": "NUMBER_INTEGER"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-run-hyperparameter-tuning": {
+      "executorLabel": "exec-run-hyperparameter-tuning",
+      "inputDefinitions": {
+        "parameters": {
+          "month": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "year": {
+            "parameterType": "NUMBER_INTEGER"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRUCT"
+          }
+        }
+      }
+    },
+    "comp-train-xgboost-model": {
+      "executorLabel": "exec-train-xgboost-model",
+      "inputDefinitions": {
+        "parameters": {
+          "dataset": {
+            "parameterType": "STRING"
+          },
+          "model_output_path": {
+            "parameterType": "STRING"
+          },
+          "month": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "params": {
+            "parameterType": "STRUCT"
+          },
+          "year": {
+            "parameterType": "NUMBER_INTEGER"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-register-model-in-vertex-ai": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "register_model_in_vertex_ai"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef register_model_in_vertex_ai(\n    year: int,\n    month: int,\n    model_output_path: str,\n    model_display_name: str\n) -> str:\n    from google.cloud import aiplatform\n\n    print('INICIO')\n\n    aiplatform.init(\n        project=\"proyecto-1-461620\",\n        location=\"us-central1\",\n        staging_bucket=\"gs://proyecto_1_ml_central\"\n    )\n\n    print('1'*70)\n\n    artifact_uri = f\"{model_output_path}/{year:04d}_{month:02d}\"  # Ej: gs://proyecto_1_ml/models/2025_06\n\n    print('2'*70)\n\n    model = aiplatform.Model.upload(\n        display_name=model_display_name,\n        artifact_uri=artifact_uri,\n        serving_container_image_uri=\"us-docker.pkg.dev/vertex-ai/prediction/xgboost-cpu.1-7:latest\"\n    )\n\n    print('3'*70)\n\n    return model.resource_name\n\n"
+          ],
+          "image": "us-central1-docker.pkg.dev/proyecto-1-461620/my-kfp-repo/xgboost-pipeline-img:latest"
+        }
+      },
+      "exec-run-hyperparameter-tuning": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "run_hyperparameter_tuning"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef run_hyperparameter_tuning(year: int, month: int) -> dict:\n    from google.cloud import aiplatform\n    from google.cloud.aiplatform import hyperparameter_tuning as hpt\n    import json\n    import gcsfs\n\n    aiplatform.init(\n        project=\"proyecto-1-461620\",\n        location=\"us-central1\",\n        staging_bucket=\"gs://proyecto_1_ml_central\"\n    )\n\n    job = aiplatform.HyperparameterTuningJob(\n        display_name=\"xgb-hpt-job\",\n        custom_job=aiplatform.CustomJob(\n            display_name=\"xgb-custom-job\",\n            worker_pool_specs=[\n                {\n                    \"machine_spec\": {\"machine_type\": \"n1-standard-4\"},\n                    \"replica_count\": 1,\n                    \"container_spec\": {\n                        \"image_uri\": \"us-central1-docker.pkg.dev/proyecto-1-461620/my-kfp-repo/xgboost-hpt-img:latest\",\n                        \"args\": [\n                            f\"--year={year}\",\n                            f\"--month={month}\",\n                            \"--n_estimators=10\",  # placeholder\n                            \"--max_depth=7\"       # placeholder\n                        ]\n                    }\n                }\n            ],\n        ),\n        metric_spec={\"f1_score\": \"maximize\"},\n        parameter_spec={\n            \"n_estimators\": hpt.IntegerParameterSpec(min=10, max=10, scale=\"linear\"),\n            \"max_depth\": hpt.IntegerParameterSpec(min=7, max=7, scale=\"linear\"),\n        },\n        max_trial_count = 1,\n        parallel_trial_count = 1,\n        search_algorithm=\"random\"\n    )\n\n    job.run(service_account=\"vertex-ai-pipeline-sa@proyecto-1-461620.iam.gserviceaccount.com\")\n\n    best_trial = job.trials[0]\n\n    best_params = best_trial.parameters\n\n    n_estimators_opt = best_params[1].value\n    max_depth_opt = best_params[0].value\n\n    best_params_dict = {\n        'n_estimators': n_estimators_opt,\n        'max_depth': max_depth_opt\n\n    }\n\n    return best_params_dict\n\n"
+          ],
+          "image": "us-central1-docker.pkg.dev/proyecto-1-461620/my-kfp-repo/xgboost-pipeline-img:latest"
+        }
+      },
+      "exec-train-xgboost-model": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "train_xgboost_model"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef train_xgboost_model(\n    year: int,\n    month: int,\n    dataset: str,\n    model_output_path: str,\n    params: dict\n\n) -> str:\n    import pandas as pd\n    import xgboost as xgb\n    import joblib\n    import gcsfs\n\n    path_X = f\"gs://proyecto_1_ml_central/datasets/{year:04d}_{month:02d}/X_{dataset}.csv\"\n    path_y = f\"gs://proyecto_1_ml_central/datasets/{year:04d}_{month:02d}/y_{dataset}.csv\"\n\n    print('Path X:', path_X)\n    print('Path y:', path_y)\n\n    print('Params:', params)\n\n    X = pd.read_csv(path_X)\n    y = pd.read_csv(path_y)\n\n    model = xgb.XGBClassifier(\n        n_estimators = params['n_estimators'], \n        max_depth = params['max_depth'], \n        learning_rate = 0.2, \n        random_state = 0)\n\n    model = model.fit(X, y)\n\n    model_filename = \"model.joblib\"\n    joblib.dump(model, model_filename)\n\n    fs = gcsfs.GCSFileSystem()\n    full_model_path = f\"{model_output_path}/{year:04d}_{month:02d}/{model_filename}\"\n    with fs.open(full_model_path, 'wb') as f:\n        with open(model_filename, 'rb') as local_f:\n            f.write(local_f.read())\n\n    return full_model_path\n\n"
+          ],
+          "image": "us-central1-docker.pkg.dev/proyecto-1-461620/my-kfp-repo/xgboost-pipeline-img:latest"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "Pipeline que entrena un modelo XGBoost desde un dataset en GCS",
+    "name": "xgboost-training-pipeline"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "register-model-in-vertex-ai": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-register-model-in-vertex-ai"
+          },
+          "dependentTasks": [
+            "train-xgboost-model"
+          ],
+          "inputs": {
+            "parameters": {
+              "model_display_name": {
+                "runtimeValue": {
+                  "constant": "xgboost-model-{{$.inputs.parameters['pipelinechannel--year']}}-{{$.inputs.parameters['pipelinechannel--month']}}"
+                }
+              },
+              "model_output_path": {
+                "componentInputParameter": "model_output_path"
+              },
+              "month": {
+                "componentInputParameter": "month"
+              },
+              "pipelinechannel--month": {
+                "componentInputParameter": "month"
+              },
+              "pipelinechannel--year": {
+                "componentInputParameter": "year"
+              },
+              "year": {
+                "componentInputParameter": "year"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "register-model-in-vertex-ai"
+          }
+        },
+        "run-hyperparameter-tuning": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-run-hyperparameter-tuning"
+          },
+          "inputs": {
+            "parameters": {
+              "month": {
+                "componentInputParameter": "month"
+              },
+              "year": {
+                "componentInputParameter": "year"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "run-hyperparameter-tuning"
+          }
+        },
+        "train-xgboost-model": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-train-xgboost-model"
+          },
+          "dependentTasks": [
+            "run-hyperparameter-tuning"
+          ],
+          "inputs": {
+            "parameters": {
+              "dataset": {
+                "runtimeValue": {
+                  "constant": "train"
+                }
+              },
+              "model_output_path": {
+                "componentInputParameter": "model_output_path"
+              },
+              "month": {
+                "componentInputParameter": "month"
+              },
+              "params": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "run-hyperparameter-tuning"
+                }
+              },
+              "year": {
+                "componentInputParameter": "year"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "train-xgboost-model"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "model_output_path": {
+          "parameterType": "STRING"
+        },
+        "month": {
+          "parameterType": "NUMBER_INTEGER"
+        },
+        "year": {
+          "parameterType": "NUMBER_INTEGER"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.13.0"
+}
